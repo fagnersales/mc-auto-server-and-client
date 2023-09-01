@@ -1,5 +1,7 @@
 use std::fmt::Display;
 
+use crate::Coords;
+
 #[derive(Clone, Copy)]
 pub struct Vector3D {
     pub x: f64,
@@ -53,6 +55,26 @@ impl std::ops::Sub for Vector3D {
 impl Display for Vector3D {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "X: {}, Y: {}, Z: {}", self.x, self.y, self.z)
+    }
+}
+
+impl From<&Coords> for Vector3D {
+    fn from(value: &Coords) -> Self {
+        Vector3D {
+            x: value.x,
+            y: 0.,
+            z: value.z,
+        }
+    }
+}
+
+impl From<(f64, f64, f64)> for Vector3D {
+    fn from(value: (f64, f64, f64)) -> Self {
+        Vector3D {
+            x: value.0,
+            y: value.1,
+            z: value.2,
+        }
     }
 }
 
