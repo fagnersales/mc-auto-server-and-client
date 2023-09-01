@@ -78,6 +78,16 @@ impl From<(f64, f64, f64)> for Vector3D {
     }
 }
 
+impl From<[f64; 3]> for Vector3D {
+    fn from(value: [f64; 3]) -> Self {
+        Vector3D {
+            x: value[0],
+            y: value[1],
+            z: value[2],
+        }
+    }
+}
+
 // pub fn estimative_walking_time(from: Vector3D, to: Vector3D) -> f64 {
 //     let direction = from - to;
 //     return direction.get_magnitude() / (0.21585 * 20.);
