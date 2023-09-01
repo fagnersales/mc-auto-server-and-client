@@ -1,9 +1,11 @@
+mod instructions;
 mod vectors;
 
 use actix_web::web::Bytes;
 use awc::ws;
 use enigo::*;
 use futures_util::{lock::Mutex, SinkExt, StreamExt as _};
+use instructions::read_instructions;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use std::time::Duration;
@@ -47,7 +49,6 @@ impl CoordinatorData {
     }
 }
 
-#[derive(Clone)]
 struct Walking {
     run: bool,
 }
@@ -58,7 +59,6 @@ impl From<f64> for Walking {
     }
 }
 
-#[derive(Clone)]
 struct TurningData {
     force: i32,
 }
@@ -69,29 +69,24 @@ impl From<i32> for TurningData {
     }
 }
 
-#[derive(Clone)]
-struct Turning {
-    left: Option<TurningData>,
-    right: Option<TurningData>,
+enum Turning {
+    VLEFT(TurningData),
+    VRIGHT(TurningData),
+    VIDLE,
 }
 
 impl From<i32> for Turning {
     fn from(value: i32) -> Self {
         if value < 0 {
-            Turning {
-                left: Some(TurningData::from(value)),
-                right: None,
-            }
+            Turning::VLEFT(TurningData::from(value))
+        } else if value > 0 {
+            Turning::VRIGHT(TurningData::from(value))
         } else {
-            Turning {
-                left: None,
-                right: Some(TurningData::from(value)),
-            }
+            Turning::VIDLE
         }
     }
 }
 
-#[derive(Clone)]
 struct State {
     running: bool,
     walking: Option<Walking>,
@@ -120,7 +115,12 @@ async fn main() {
     let data = Arc::new(Mutex::new(CoordinatorData::new()));
     let state = Arc::new(Mutex::new(State::new()));
 
+    let mut instructions = read_instructions();
+    instructions.reverse();
+    let instructions = Arc::new(Mutex::new(instructions));
+
     let data_clone = Arc::clone(&data);
+    let instructions_clone = Arc::clone(&instructions);
 
     let enigo1 = Arc::clone(&enigo);
     let enigo2 = Arc::clone(&enigo);
@@ -129,10 +129,6 @@ async fn main() {
     let state2 = Arc::clone(&state);
     let state3 = Arc::clone(&state);
     let state4 = Arc::clone(&state);
-
-    let goal_position = Arc::new(Mutex::new(Vector3D::from((-99.5, 0., 193.5))));
-
-    let goal_clone = Arc::clone(&goal_position);
 
     let main_task = async move {
         // Thread for logging
@@ -150,10 +146,10 @@ async fn main() {
                 }
 
                 if let Some(turning) = &state.turning {
-                    if turning.left.is_some() {
-                        println!("[LOG]: Turning Left");
-                    } else {
-                        println!("[LOG]: Turning Right");
+                    match turning {
+                        Turning::VLEFT(_force) => println!("[LOG]: Turning Left"),
+                        Turning::VRIGHT(_force) => println!("[LOG]: Turning Right"),
+                        Turning::VIDLE => (),
                     }
                 }
             }
@@ -167,12 +163,10 @@ async fn main() {
                 let state = state2.lock().await;
 
                 if let Some(turning) = &state.turning {
-                    if let Some(data) = &turning.left {
-                        enigo.mouse_move_relative(data.force * -1, 0);
-                    }
-
-                    if let Some(data) = &turning.right {
-                        enigo.mouse_move_relative(data.force * -1, 0);
+                    match turning {
+                        Turning::VLEFT(data) => enigo.mouse_move_relative(data.force * -1, 0),
+                        Turning::VRIGHT(data) => enigo.mouse_move_relative(data.force * -1, 0),
+                        Turning::VIDLE => (),
                     }
                 }
             }
@@ -185,7 +179,7 @@ async fn main() {
                 let mut enigo = enigo2.lock().await;
                 let mut state = state3.lock().await;
 
-                if let Some(walking) = &state.clone().walking {
+                if let Some(walking) = &mut state.walking {
                     if walking.run {
                         enigo.key_down(Key::Control);
                         state.running = true;
@@ -205,17 +199,17 @@ async fn main() {
 
         // Thread for managing the struc 'State'
         tokio::spawn(async move {
-            loop {
+            let mut instructions = instructions_clone.lock().await;
+            while let Some(instruction) = instructions.last().copied() {
                 sleep(Duration::from_millis(50)).await;
-
                 let mut state = state4.lock().await;
                 let data = data_clone.lock().await;
-                let goal = goal_clone.lock().await;
+                let goal = Vector3D::from(instruction.walk.to);
 
                 let my_position = Vector3D::from(&data.coords);
                 let my_angle = data.head.yaw;
 
-                let direction = goal.to_owned() - my_position;
+                let direction = goal - my_position;
 
                 let direction_angle = direction.get_normalized().to_angle();
                 let mut raw_angle_diff = my_angle - direction_angle;
@@ -236,10 +230,11 @@ async fn main() {
                     state.turning = Some(Turning::from(force));
                 }
 
-                let distance = (goal.to_owned() - my_position).get_magnitude();
+                let distance = (goal - my_position).get_magnitude();
 
                 if distance < 1. {
-                    state.walking = None
+                    state.walking = None;
+                    instructions.pop();
                 } else {
                     state.walking = Some(Walking::from(distance));
                 }
