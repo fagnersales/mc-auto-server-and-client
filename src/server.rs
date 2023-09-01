@@ -61,7 +61,6 @@ impl Handler<Connect> for ChatServer {
     fn handle(&mut self, msg: Connect, _: &mut Context<Self>) -> Self::Result {
         let id = self.rng.gen::<usize>();
         self.sessions.insert(id, msg.addr);
-
         id
     }
 }
@@ -81,4 +80,3 @@ impl Handler<ClientMessage> for ChatServer {
         self.send_message(msg.msg.as_str(), msg.id);
     }
 }
-
